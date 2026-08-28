@@ -1,0 +1,15 @@
+aws_region = "ap-southeast-2"
+name_prefix = "cod"
+
+# Replace with the Marketplace ECR digest from the COD listing.
+container_image = "709825985650.dkr.ecr.us-east-1.amazonaws.com/yumaitau/compliance-on-demand@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+# Signed JWT issued for this buyer. Do not commit the real value.
+license_key = "REPLACE_WITH_SIGNED_JWT"
+
+# Optional. Empty uses the internal ALB DNS name.
+domain = ""
+
+# Optional VPN / shared-services CIDRs. Empty = VPC CIDR only.
+# 0.0.0.0/0 and ::/0 are rejected. This stack is not internet-facing.
+allowed_ingress_cidrs = []

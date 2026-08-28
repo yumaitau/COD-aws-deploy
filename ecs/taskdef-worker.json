@@ -1,0 +1,47 @@
+{
+  "family": "cod-worker",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "REPLACED_AT_DEPLOY",
+  "taskRoleArn": "REPLACED_AT_DEPLOY",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "REPLACED_AT_DEPLOY",
+      "essential": true,
+      "command": ["node", "dist/worker-main.js"],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "ALIGNR_LOG_SERVICE", "value": "cod-worker" },
+        { "name": "AI_PROVIDER", "value": "disabled" },
+        { "name": "AI_ENABLED", "value": "false" },
+        { "name": "ALIGNR_HOST_SCANS_ENABLED", "value": "false" },
+        { "name": "ALIGNR_DEV_LICENSE", "value": "false" },
+        { "name": "ALIGNR_WORKER_RECONCILE_INTERVAL_SECONDS", "value": "60" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "SECRET_ARN:DATABASE_URL::" },
+        { "name": "REDIS_URL", "valueFrom": "SECRET_ARN:REDIS_URL::" },
+        { "name": "BETTER_AUTH_SECRET", "valueFrom": "SECRET_ARN:BETTER_AUTH_SECRET::" },
+        { "name": "ENCRYPTION_MASTER_KEY", "valueFrom": "SECRET_ARN:ENCRYPTION_MASTER_KEY::" },
+        { "name": "ALIGNR_SETUP_TOKEN", "valueFrom": "SECRET_ARN:ALIGNR_SETUP_TOKEN::" },
+        { "name": "ALIGNR_LICENSE_KEY", "valueFrom": "SECRET_ARN:ALIGNR_LICENSE_KEY::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/cod",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "worker"
+        }
+      },
+      "stopTimeout": 120
+    }
+  ]
+}

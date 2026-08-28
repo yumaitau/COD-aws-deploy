@@ -1,0 +1,47 @@
+# Buyer-overridable values for the AWS Marketplace Helm fulfillment option.
+# Pin Marketplace ECR with image.digest. Do not ship :latest to buyers.
+image:
+  repository: ""
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+app:
+  replicaCount: 1
+  cpu: 512m
+  memory: 2Gi
+
+worker:
+  replicaCount: 1
+  cpu: 512m
+  memory: 2Gi
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# External data plane (RDS + ElastiCache). Do not run Postgres on Fargate.
+databaseUrl: ""
+redisUrl: ""
+
+domain: cod.example.com
+licenseKey: ""
+devLicense: "false"
+skipSeed: "false"
+hostScansEnabled: "false"
+aiProvider: disabled
+awsRegion: ap-southeast-2
+# Matches the CloudFormation/Terraform Fargate stack (X86_64).
+# Set arm64 only when the image is linux/arm64 and the cluster has Graviton nodes.
+arch: amd64
+# Set "0" only for smoke tests without the Amazon RDS / ElastiCache CA bundle.
+nodeTlsRejectUnauthorized: ""
+
+betterAuthSecret: ""
+encryptionMasterKey: ""
+setupToken: ""
+
+persistence:
+  enabled: false
+  storageClass: ""
+  size: 10Gi

@@ -1,0 +1,9 @@
+Compliance on Demand (COD) AWS Marketplace deploy
+Copyright 2026 Yuma IT
+
+This repository contains Terraform, CloudFormation, Helm, ECS, and IAM
+artifacts for deploying the COD container product in a buyer AWS account.
+
+The COD application container image is not licensed under Apache-2.0.
+Use of the image requires an AWS Marketplace subscription to
+Compliance on Demand.

@@ -1,0 +1,591 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Buyer-hosted Compliance on Demand (COD) on ECS Fargate (AWS Marketplace container).
+  Private subnets, internal ALB, digest-pinned image. Not internet-facing by default.
+
+Parameters:
+  ContainerImage:
+    Type: String
+    Description: Marketplace ECR image digest. Must be sha256-pinned. latest is rejected.
+    AllowedPattern: '^(?!.*:[Ll][Aa][Tt][Ee][Ss][Tt]).+@sha256:[0-9a-f]{64}$'
+    ConstraintDescription: Image must end in @sha256:<64 hex> and must not use the latest tag.
+  LicenseKey:
+    Type: String
+    NoEcho: true
+    Description: Signed COD license JWT for this buyer deployment.
+  NamePrefix:
+    Type: String
+    Default: cod
+    AllowedPattern: '^[a-z][a-z0-9-]{1,15}$'
+  VpcCidr:
+    Type: String
+    Default: 10.80.0.0/16
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${NamePrefix}-vpc
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+
+  IgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${NamePrefix}-public-0
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${NamePrefix}-public-1
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${NamePrefix}-private-0
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${NamePrefix}-private-1
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: IgwAttach
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  PublicAssoc1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicAssoc2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateAssoc1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateAssoc2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Internal ALB
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: VPC CIDR to the internal ALB
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref VpcCidr
+      SecurityGroupEgress:
+        - Description: ALB to app tasks
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  AppSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: App and worker
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: Internal ALB to app
+          IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref AlbSg
+      SecurityGroupEgress:
+        - Description: NAT egress for cloud and SaaS API scans
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  DbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: App to PostgreSQL
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSg
+
+  RedisSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Redis
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: App to Redis
+          IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref AppSg
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: COD
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  DbPassword:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${NamePrefix}/db-password
+      GenerateSecretString:
+        PasswordLength: 24
+        ExcludePunctuation: true
+
+  RedisAuth:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${NamePrefix}/redis-auth
+      GenerateSecretString:
+        PasswordLength: 24
+        ExcludePunctuation: true
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${NamePrefix}-pg
+      Engine: postgres
+      EngineVersion: "16"
+      DBInstanceClass: db.t4g.medium
+      AllocatedStorage: 50
+      DBName: cod
+      MasterUsername: cod
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbPassword}:SecretString}}"
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DbSg
+      StorageEncrypted: true
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Compliance on Demand Redis
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  Redis:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub ${NamePrefix}-redis
+      ReplicationGroupDescription: Compliance on Demand Redis
+      Engine: redis
+      EngineVersion: "7.1"
+      CacheNodeType: cache.t4g.small
+      NumCacheClusters: 1
+      Port: 6379
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      SecurityGroupIds:
+        - !Ref RedisSg
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AuthToken: !Sub "{{resolve:secretsmanager:${RedisAuth}:SecretString}}"
+
+  AuthSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+
+  SetupToken:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  EncryptionKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString:
+        PasswordLength: 44
+        ExcludePunctuation: true
+
+  RuntimeSecret:
+    Type: AWS::SecretsManager::Secret
+    DependsOn:
+      - Database
+      - Redis
+    Properties:
+      Name: !Sub ${NamePrefix}/runtime
+      SecretString: !Sub
+        - '{"DATABASE_URL":"postgresql://cod:${DbPass}@${DbHost}:5432/cod?schema=public&sslmode=verify-full","REDIS_URL":"rediss://:${RedisPass}@${RedisHost}:6379","BETTER_AUTH_SECRET":"${Auth}","ENCRYPTION_MASTER_KEY":"${Enc}","ALIGNR_SETUP_TOKEN":"${Setup}","ALIGNR_INSTALL_ID":"${Install}","ALIGNR_LICENSE_KEY":"${License}"}'
+        - DbPass: !Sub "{{resolve:secretsmanager:${DbPassword}:SecretString}}"
+          RedisPass: !Sub "{{resolve:secretsmanager:${RedisAuth}:SecretString}}"
+          Auth: !Sub "{{resolve:secretsmanager:${AuthSecret}:SecretString}}"
+          Enc: !Sub "{{resolve:secretsmanager:${EncryptionKey}:SecretString}}"
+          Setup: !Sub "{{resolve:secretsmanager:${SetupToken}:SecretString}}"
+          DbHost: !GetAtt Database.Endpoint.Address
+          RedisHost: !GetAtt Redis.PrimaryEndPoint.Address
+          Install: !Ref AWS::StackName
+          License: !Ref LicenseKey
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: "*"
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-task
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ecs-exec
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+
+  LogGroupApp:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${NamePrefix}/app
+      RetentionInDays: 30
+
+  LogGroupWorker:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${NamePrefix}/worker
+      RetentionInDays: 30
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref NamePrefix
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${NamePrefix}-alb
+      Scheme: internal
+      Type: application
+      LoadBalancerAttributes:
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref AlbSg
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${NamePrefix}-app
+      Port: 3000
+      Protocol: HTTP
+      VpcId: !Ref Vpc
+      TargetType: ip
+      HealthCheckPath: /api/health
+      Matcher:
+        HttpCode: 200-503
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  AppTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${NamePrefix}-app
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ContainerDefinitions:
+        - Name: app
+          Image: !Ref ContainerImage
+          Essential: true
+          Command: ["node", "server.js"]
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: HOSTNAME
+              Value: "0.0.0.0"
+            - Name: PORT
+              Value: "3000"
+            - Name: ALIGNR_DOMAIN
+              Value: !GetAtt Alb.DNSName
+            - Name: BETTER_AUTH_URL
+              Value: !Sub http://${Alb.DNSName}
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: ALIGNR_DEV_LICENSE
+              Value: "false"
+            - Name: AI_PROVIDER
+              Value: disabled
+            - Name: ALIGNR_LOG_SERVICE
+              Value: cod-app
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Sub "${RuntimeSecret}:DATABASE_URL::"
+            - Name: REDIS_URL
+              ValueFrom: !Sub "${RuntimeSecret}:REDIS_URL::"
+            - Name: BETTER_AUTH_SECRET
+              ValueFrom: !Sub "${RuntimeSecret}:BETTER_AUTH_SECRET::"
+            - Name: ENCRYPTION_MASTER_KEY
+              ValueFrom: !Sub "${RuntimeSecret}:ENCRYPTION_MASTER_KEY::"
+            - Name: ALIGNR_SETUP_TOKEN
+              ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_SETUP_TOKEN::"
+            - Name: ALIGNR_INSTALL_ID
+              ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_INSTALL_ID::"
+            - Name: ALIGNR_LICENSE_KEY
+              ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_LICENSE_KEY::"
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.status<500||r.status===503?0:1)).catch(()=>process.exit(1))"'
+            Interval: 30
+            Timeout: 10
+            Retries: 5
+            StartPeriod: 180
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupApp
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+  WorkerTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${NamePrefix}-worker
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ContainerDefinitions:
+        - Name: worker
+          Image: !Ref ContainerImage
+          Essential: true
+          Command: ["node", "dist/worker-main.js"]
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: ALIGNR_DOMAIN
+              Value: !GetAtt Alb.DNSName
+            - Name: BETTER_AUTH_URL
+              Value: !Sub http://${Alb.DNSName}
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: ALIGNR_DEV_LICENSE
+              Value: "false"
+            - Name: AI_PROVIDER
+              Value: disabled
+            - Name: ALIGNR_LOG_SERVICE
+              Value: cod-worker
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Sub "${RuntimeSecret}:DATABASE_URL::"
+            - Name: REDIS_URL
+              ValueFrom: !Sub "${RuntimeSecret}:REDIS_URL::"
+            - Name: BETTER_AUTH_SECRET
+              ValueFrom: !Sub "${RuntimeSecret}:BETTER_AUTH_SECRET::"
+            - Name: ENCRYPTION_MASTER_KEY
+              ValueFrom: !Sub "${RuntimeSecret}:ENCRYPTION_MASTER_KEY::"
+            - Name: ALIGNR_SETUP_TOKEN
+              ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_SETUP_TOKEN::"
+            - Name: ALIGNR_INSTALL_ID
+              ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_INSTALL_ID::"
+            - Name: ALIGNR_LICENSE_KEY
+              ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_LICENSE_KEY::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupWorker
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: worker
+
+  AppService:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: !Sub ${NamePrefix}-app
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref AppTask
+      DesiredCount: 1
+      LaunchType: FARGATE
+      EnableExecuteCommand: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref AppSg
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - ContainerName: app
+          ContainerPort: 3000
+          TargetGroupArn: !Ref TargetGroup
+
+  WorkerService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub ${NamePrefix}-worker
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref WorkerTask
+      DesiredCount: 1
+      LaunchType: FARGATE
+      EnableExecuteCommand: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref AppSg
+          AssignPublicIp: DISABLED
+
+Outputs:
+  InternalAlbDnsName:
+    Value: !GetAtt Alb.DNSName
+  SetupUrl:
+    Value: !Sub http://${Alb.DNSName}/setup
+  RuntimeSecretArn:
+    Value: !Ref RuntimeSecret
+  UnsubscribeNote:
+    Value: Unsubscribe = delete this stack. Data stays in the buyer account.
+  AccessNote:
+    Value: This stack is VPC-internal. Reach /setup from a VPN or SSM port-forward. It is not published to the internet.

@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "ContainerImage",
+    "ParameterValue": "709825985650.dkr.ecr.us-east-1.amazonaws.com/yumaitau/compliance-on-demand@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "ParameterKey": "LicenseKey",
+    "ParameterValue": "REPLACE_WITH_SIGNED_JWT"
+  },
+  {
+    "ParameterKey": "NamePrefix",
+    "ParameterValue": "cod"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.80.0.0/16"
+  }
+]

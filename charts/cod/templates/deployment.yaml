@@ -1,0 +1,200 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cod.fullname" . }}-app
+  labels:
+    {{- include "cod.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cod.selector" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "cod.selector" . | nindent 8 }}
+        app.kubernetes.io/component: app
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: {{ .Values.arch | default "amd64" | quote }}
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: app
+          {{- if .Values.image.digest }}
+          image: "{{ required "image.repository is required" .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ required "image.repository is required" .Values.image.repository }}:{{ required "image.tag or image.digest is required" .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["node", "server.js"]
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: {{ include "cod.fullname" . }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+            - name: ALIGNR_LOG_SERVICE
+              value: cod-app
+            - name: ALIGNR_DOMAIN
+              value: {{ .Values.domain | quote }}
+            - name: BETTER_AUTH_URL
+              value: "https://{{ .Values.domain }}"
+            - name: ALIGNR_LICENSE_KEY
+              value: {{ .Values.licenseKey | quote }}
+            - name: ALIGNR_DEV_LICENSE
+              value: {{ .Values.devLicense | quote }}
+            - name: ALIGNR_SKIP_SEED
+              value: {{ .Values.skipSeed | quote }}
+            - name: ALIGNR_HOST_SCANS_ENABLED
+              value: {{ .Values.hostScansEnabled | quote }}
+            - name: AI_PROVIDER
+              value: {{ .Values.aiProvider | quote }}
+            - name: AI_ENABLED
+              value: {{ ternary "false" "true" (eq .Values.aiProvider "disabled") | quote }}
+            - name: AWS_REGION
+              value: {{ .Values.awsRegion | quote }}
+            {{- if .Values.nodeTlsRejectUnauthorized }}
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: {{ .Values.nodeTlsRejectUnauthorized | quote }}
+            {{- end }}
+            - name: SECURITY_DOCUMENT_STORAGE_DIR
+              value: /app/data/security-documents
+            - name: ASSESSOR_PACK_STORAGE_DIR
+              value: /app/data/assessor-packs
+            - name: BRANDING_ASSET_STORAGE_DIR
+              value: /app/data/branding-assets
+            - name: ALIGNR_BACKUP_DESTINATION
+              value: /app/backups/nightly
+          resources:
+            requests:
+              cpu: {{ .Values.app.cpu }}
+              memory: {{ .Values.app.memory }}
+            limits:
+              memory: {{ .Values.app.memory }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            failureThreshold: 8
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cod.fullname" . }}-worker
+  labels:
+    {{- include "cod.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cod.selector" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "cod.selector" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: {{ .Values.arch | default "amd64" | quote }}
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: worker
+          {{- if .Values.image.digest }}
+          image: "{{ required "image.repository is required" .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ required "image.repository is required" .Values.image.repository }}:{{ required "image.tag or image.digest is required" .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["node", "dist/worker-main.js"]
+          envFrom:
+            - secretRef:
+                name: {{ include "cod.fullname" . }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: ALIGNR_LOG_SERVICE
+              value: cod-worker
+            - name: ALIGNR_DOMAIN
+              value: {{ .Values.domain | quote }}
+            - name: BETTER_AUTH_URL
+              value: "https://{{ .Values.domain }}"
+            - name: ALIGNR_LICENSE_KEY
+              value: {{ .Values.licenseKey | quote }}
+            - name: ALIGNR_DEV_LICENSE
+              value: {{ .Values.devLicense | quote }}
+            - name: ALIGNR_SKIP_SEED
+              value: "true"
+            - name: ALIGNR_HOST_SCANS_ENABLED
+              value: {{ .Values.hostScansEnabled | quote }}
+            - name: AI_PROVIDER
+              value: {{ .Values.aiProvider | quote }}
+            - name: AI_ENABLED
+              value: {{ ternary "false" "true" (eq .Values.aiProvider "disabled") | quote }}
+            - name: AWS_REGION
+              value: {{ .Values.awsRegion | quote }}
+            {{- if .Values.nodeTlsRejectUnauthorized }}
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: {{ .Values.nodeTlsRejectUnauthorized | quote }}
+            {{- end }}
+            - name: ALIGNR_WORKER_RECONCILE_INTERVAL_SECONDS
+              value: "60"
+            - name: SECURITY_DOCUMENT_STORAGE_DIR
+              value: /app/data/security-documents
+            - name: ASSESSOR_PACK_STORAGE_DIR
+              value: /app/data/assessor-packs
+            - name: BRANDING_ASSET_STORAGE_DIR
+              value: /app/data/branding-assets
+            - name: ALIGNR_BACKUP_DESTINATION
+              value: /app/backups/nightly
+          resources:
+            requests:
+              cpu: {{ .Values.worker.cpu }}
+              memory: {{ .Values.worker.memory }}
+            limits:
+              memory: {{ .Values.worker.memory }}
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cod.fullname" . }}
+  labels:
+    {{- include "cod.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "cod.selector" . | nindent 4 }}
+    app.kubernetes.io/component: app
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

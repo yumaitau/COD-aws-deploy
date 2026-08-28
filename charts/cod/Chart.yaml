@@ -1,0 +1,15 @@
+apiVersion: v2
+name: cod
+description: Compliance on Demand (COD) for Amazon EKS / AWS Marketplace
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - compliance
+  - cspm
+  - eks
+  - marketplace
+  - cod
+home: https://complianceondemand.com.au
+sources:
+  - https://github.com/yumaitau/COD-aws-deploy
