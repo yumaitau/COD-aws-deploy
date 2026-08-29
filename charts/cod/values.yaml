@@ -27,9 +27,6 @@ redisUrl: ""
 domain: cod.example.com
 licenseKey: ""
 skipSeed: "false"
-marketplace:
-  productCode: ""
-  productSku: ""
 hostScansEnabled: "false"
 aiProvider: disabled
 awsRegion: ap-southeast-2

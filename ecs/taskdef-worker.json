@@ -22,8 +22,6 @@
         { "name": "AI_PROVIDER", "value": "disabled" },
         { "name": "AI_ENABLED", "value": "false" },
         { "name": "ALIGNR_HOST_SCANS_ENABLED", "value": "false" },
-        { "name": "AWS_MARKETPLACE_PRODUCT_CODE", "value": "REPLACED_AT_DEPLOY" },
-        { "name": "AWS_MARKETPLACE_PRODUCT_SKU", "value": "REPLACED_AT_DEPLOY" },
         { "name": "ALIGNR_WORKER_RECONCILE_INTERVAL_SECONDS", "value": "60" }
       ],
       "secrets": [

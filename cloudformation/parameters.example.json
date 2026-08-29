@@ -8,14 +8,6 @@
     "ParameterValue": "REPLACE_WITH_SIGNED_JWT"
   },
   {
-    "ParameterKey": "MarketplaceProductCode",
-    "ParameterValue": "REPLACE_WITH_LISTING_PRODUCT_CODE"
-  },
-  {
-    "ParameterKey": "MarketplaceProductSku",
-    "ParameterValue": "REPLACE_WITH_LISTING_PRODUCT_ID"
-  },
-  {
     "ParameterKey": "NamePrefix",
     "ParameterValue": "cod"
   },

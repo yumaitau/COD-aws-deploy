@@ -9,7 +9,7 @@ Adds:
 - **Operational excellence:** ALB access logs, Performance Insights, enhanced monitoring, Postgres DDL/slow-query logs
 - **Rotation:** Secrets Manager rotates the Postgres password only. Session and encryption keys are never rotated.
 
-Same `terraform.tfvars` shape as the default stack (`container_image`, `license_key`, `marketplace_product_code`, `marketplace_product_sku`, `domain`, `allowed_ingress_cidrs`). There is no license bypass.
+Same `terraform.tfvars` shape as the default stack (`container_image`, `license_key`, `domain`, `allowed_ingress_cidrs`). Marketplace entitlement is enforced by the image. There is no license bypass.
 
 ## Destroy
 

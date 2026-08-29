@@ -10,9 +10,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     ContainerImage='<marketplace-ecr>@sha256:<digest>' \
-    LicenseKey='<signed-jwt>' \
-    MarketplaceProductCode='<listing-product-code>' \
-    MarketplaceProductSku='<listing-product-id>'
+    LicenseKey='<signed-jwt>'
 ```
 
 The stack is VPC-internal. Reach `/setup` from a VPN or ECS Exec. `latest` image tags are rejected.

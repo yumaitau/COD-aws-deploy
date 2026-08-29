@@ -354,13 +354,15 @@ resource "aws_iam_role_policy" "task_exec" {
         Sid    = "AwsMarketplaceLicense"
         Effect = "Allow"
         Action = [
-          "license-manager:CheckoutLicense",
-          "license-manager:GetLicense",
-          "license-manager:ExtendLicenseConsumption",
-          "license-manager:ListReceivedLicenses"
-        ]
-        Resource = "*"
-      },
+        "license-manager:CheckoutLicense",
+        "license-manager:GetLicense",
+        "license-manager:CheckInLicense",
+        "license-manager:ExtendLicenseConsumption",
+        "license-manager:ListReceivedLicenses"
+      ]
+      # AWS Marketplace License Manager APIs do not support resource-level ARNs.
+      Resource = "*"
+    },
     ]
   })
 }
@@ -381,8 +383,6 @@ locals {
     { name = "ALIGNR_DOMAIN", value = var.domain != "" ? var.domain : aws_lb.app.dns_name },
     { name = "BETTER_AUTH_URL", value = local.app_url },
     { name = "AWS_REGION", value = var.aws_region },
-    { name = "AWS_MARKETPLACE_PRODUCT_CODE", value = var.marketplace_product_code },
-    { name = "AWS_MARKETPLACE_PRODUCT_SKU", value = var.marketplace_product_sku },
     { name = "AI_PROVIDER", value = "disabled" },
   ]
   shared_secrets = [
