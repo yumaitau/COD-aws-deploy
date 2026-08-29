@@ -1,0 +1,36 @@
+compact: true
+directory:
+  - terraform
+  - terraform-well-architected
+  - cloudformation
+  - charts
+  - ecs
+framework:
+  - terraform
+  - cloudformation
+  - kubernetes
+download-external-modules: false
+skip-path:
+  - terraform/.terraform
+  - terraform-well-architected/.terraform
+# Residual checks that stay buyer-optional or would break first-launch.
+# Ingress 0.0.0.0/0 is not skipped — the lean stack rejects it.
+skip-check:
+  - CKV_AWS_2 # HTTP listener is first-launch only; HTTPS when certificate_arn is set
+  - CKV_AWS_103 # same HTTP listener
+  - CKV_AWS_157 # Multi-AZ is in terraform-well-architected, not the lean stack
+  - CKV_AWS_293 # RDS deletion protection blocks test teardown
+  - CKV_AWS_353 # Performance Insights cost on the lean instance class
+  - CKV_AWS_118 # Enhanced monitoring extra role and cost
+  - CKV_AWS_338 # Lean default is short log retention; WA stack keeps longer
+  - CKV_AWS_150 # ALB deletion protection blocks test teardown
+  - CKV2_AWS_57 # Secret rotation is in terraform-well-architected only
+  - CKV2_AWS_50 # Redis Multi-AZ is in terraform-well-architected only
+  - CKV_AWS_161 # App authenticates to Postgres with Secrets Manager, not IAM DB auth
+  - CKV_AWS_158 # Lean logs use AWS-managed encryption; WA stack adds a CMK
+  - CKV_AWS_149 # Lean Secrets Manager uses the AWS-managed key; WA stack adds a CMK
+  - CKV_AWS_191 # Lean Redis uses service encryption; WA stack adds a CMK
+  - CKV_AWS_91 # ALB access logs are in terraform-well-architected only
+  - CKV2_AWS_11 # VPC flow logs are in terraform-well-architected only
+  - CKV_AWS_355 # License Manager and ECS Exec ssmmessages APIs do not support resource ARNs
+  - CKV_AWS_108 # Lean CloudFormation execution policy uses GetSecretValue on *; scope after apply
