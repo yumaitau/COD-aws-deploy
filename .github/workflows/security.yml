@@ -1,0 +1,203 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fmt-validate:
+    name: Terraform and Helm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate default stack
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Terraform validate well-architected stack
+        working-directory: terraform-well-architected
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Helm lint
+        run: helm lint charts/cod
+
+  checkov:
+    name: Checkov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          config_file: .checkov.yaml
+          soft_fail: false
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      - name: Upload Checkov SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@v5
+
+  trivy-vulnerabilities:
+    name: Trivy dependency vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scan dependencies
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-vulnerabilities.sarif
+
+      - name: Upload vulnerability results to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-vulnerabilities.sarif
+          category: trivy-vulnerabilities
+
+  trivy-secrets-and-misconfigurations:
+    name: Trivy secrets and misconfigurations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scan source and configuration
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scanners: secret,misconfig
+          format: sarif
+          output: trivy-secrets-and-misconfigurations.sarif
+
+      - name: Upload secret and configuration results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-secrets-and-misconfigurations.sarif
+          category: trivy-secrets-and-misconfigurations
+
+      - name: Scan terraform config
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          format: sarif
+          output: trivy-terraform.sarif
+
+      - name: Upload terraform config results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-terraform.sarif
+          category: trivy-config-terraform
+
+      - name: Scan well-architected terraform config
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform-well-architected
+          format: sarif
+          output: trivy-terraform-wa.sarif
+
+      - name: Upload well-architected terraform config results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-terraform-wa.sarif
+          category: trivy-config-terraform-wa
+
+      - name: Scan cloudformation config
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: cloudformation
+          format: sarif
+          output: trivy-cloudformation.sarif
+
+      - name: Upload cloudformation config results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-cloudformation.sarif
+          category: trivy-config-cloudformation
+
+      - name: Scan charts config
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: charts
+          format: sarif
+          output: trivy-charts.sarif
+
+      - name: Upload charts config results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-charts.sarif
+          category: trivy-config-charts
