@@ -34,3 +34,5 @@ skip-check:
   - CKV2_AWS_11 # VPC flow logs are in terraform-well-architected only
   - CKV_AWS_355 # License Manager and ECS Exec ssmmessages APIs do not support resource ARNs
   - CKV_AWS_108 # Lean CloudFormation execution policy uses GetSecretValue on *; scope after apply
+  - CKV_AWS_382 # NAT egress 0.0.0.0/0 is required so workers can scan public APIs. Not ingress
+  - CKV_K8S_22 # App and worker write tmp and /app/data; rootfs cannot be read-only
