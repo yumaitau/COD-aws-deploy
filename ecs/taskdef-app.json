@@ -25,7 +25,8 @@
         { "name": "AI_PROVIDER", "value": "disabled" },
         { "name": "AI_ENABLED", "value": "false" },
         { "name": "ALIGNR_HOST_SCANS_ENABLED", "value": "false" },
-        { "name": "ALIGNR_DEV_LICENSE", "value": "false" }
+        { "name": "AWS_MARKETPLACE_PRODUCT_CODE", "value": "REPLACED_AT_DEPLOY" },
+        { "name": "AWS_MARKETPLACE_PRODUCT_SKU", "value": "REPLACED_AT_DEPLOY" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "SECRET_ARN:DATABASE_URL::" },

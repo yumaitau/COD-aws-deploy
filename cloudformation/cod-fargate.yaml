@@ -13,6 +13,16 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Signed COD license JWT for this buyer deployment.
+  MarketplaceProductCode:
+    Type: String
+    Description: AWS Marketplace product code from the COD listing. Required. There is no license bypass.
+    AllowedPattern: ".+"
+    ConstraintDescription: Subscribe on AWS Marketplace and pass the listing product code.
+  MarketplaceProductSku:
+    Type: String
+    Description: AWS Marketplace product ID (SKU) from the COD listing. Required. There is no license bypass.
+    AllowedPattern: ".+"
+    ConstraintDescription: Subscribe on AWS Marketplace and pass the listing product ID.
   NamePrefix:
     Type: String
     Default: cod
@@ -354,6 +364,14 @@ Resources:
                   - ssmmessages:OpenControlChannel
                   - ssmmessages:OpenDataChannel
                 Resource: "*"
+              - Sid: AwsMarketplaceLicense
+                Effect: Allow
+                Action:
+                  - license-manager:CheckoutLicense
+                  - license-manager:GetLicense
+                  - license-manager:ExtendLicenseConsumption
+                  - license-manager:ListReceivedLicenses
+                Resource: "*"
 
   LogGroupApp:
     Type: AWS::Logs::LogGroup
@@ -446,8 +464,10 @@ Resources:
               Value: !Sub http://${Alb.DNSName}
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: ALIGNR_DEV_LICENSE
-              Value: "false"
+            - Name: AWS_MARKETPLACE_PRODUCT_CODE
+              Value: !Ref MarketplaceProductCode
+            - Name: AWS_MARKETPLACE_PRODUCT_SKU
+              Value: !Ref MarketplaceProductSku
             - Name: AI_PROVIDER
               Value: disabled
             - Name: ALIGNR_LOG_SERVICE
@@ -509,8 +529,10 @@ Resources:
               Value: !Sub http://${Alb.DNSName}
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: ALIGNR_DEV_LICENSE
-              Value: "false"
+            - Name: AWS_MARKETPLACE_PRODUCT_CODE
+              Value: !Ref MarketplaceProductCode
+            - Name: AWS_MARKETPLACE_PRODUCT_SKU
+              Value: !Ref MarketplaceProductSku
             - Name: AI_PROVIDER
               Value: disabled
             - Name: ALIGNR_LOG_SERVICE

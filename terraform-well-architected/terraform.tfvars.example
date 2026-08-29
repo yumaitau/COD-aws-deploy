@@ -7,6 +7,10 @@ container_image = "709825985650.dkr.ecr.us-east-1.amazonaws.com/yumaitau/complia
 # Signed JWT issued for this buyer. Do not commit the real value.
 license_key = "REPLACE_WITH_SIGNED_JWT"
 
+# From the AWS Marketplace listing. Required. There is no license bypass.
+marketplace_product_code = "REPLACE_WITH_LISTING_PRODUCT_CODE"
+marketplace_product_sku  = "REPLACE_WITH_LISTING_PRODUCT_ID"
+
 # Optional. Empty uses the internal ALB DNS name.
 domain = ""
 

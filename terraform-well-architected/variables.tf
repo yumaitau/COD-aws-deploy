@@ -39,6 +39,26 @@ variable "license_key" {
   sensitive   = true
 }
 
+variable "marketplace_product_code" {
+  type        = string
+  description = "AWS Marketplace product code from the COD listing. Required. There is no license bypass."
+
+  validation {
+    condition     = length(trimspace(var.marketplace_product_code)) > 0
+    error_message = "marketplace_product_code is required. Subscribe on AWS Marketplace and copy the product code from the listing."
+  }
+}
+
+variable "marketplace_product_sku" {
+  type        = string
+  description = "AWS Marketplace product ID (SKU) from the COD listing. Required. There is no license bypass."
+
+  validation {
+    condition     = length(trimspace(var.marketplace_product_sku)) > 0
+    error_message = "marketplace_product_sku is required. Subscribe on AWS Marketplace and copy the product ID from the listing."
+  }
+}
+
 variable "domain" {
   type        = string
   description = "Hostname operators use for BETTER_AUTH_URL. Defaults to the internal ALB DNS name when empty."

@@ -51,8 +51,10 @@ spec:
               value: "https://{{ .Values.domain }}"
             - name: ALIGNR_LICENSE_KEY
               value: {{ .Values.licenseKey | quote }}
-            - name: ALIGNR_DEV_LICENSE
-              value: {{ .Values.devLicense | quote }}
+            - name: AWS_MARKETPLACE_PRODUCT_CODE
+              value: {{ required "marketplace.productCode is required. Subscribe on AWS Marketplace." .Values.marketplace.productCode | quote }}
+            - name: AWS_MARKETPLACE_PRODUCT_SKU
+              value: {{ required "marketplace.productSku is required. Subscribe on AWS Marketplace." .Values.marketplace.productSku | quote }}
             - name: ALIGNR_SKIP_SEED
               value: {{ .Values.skipSeed | quote }}
             - name: ALIGNR_HOST_SCANS_ENABLED
@@ -146,8 +148,10 @@ spec:
               value: "https://{{ .Values.domain }}"
             - name: ALIGNR_LICENSE_KEY
               value: {{ .Values.licenseKey | quote }}
-            - name: ALIGNR_DEV_LICENSE
-              value: {{ .Values.devLicense | quote }}
+            - name: AWS_MARKETPLACE_PRODUCT_CODE
+              value: {{ required "marketplace.productCode is required. Subscribe on AWS Marketplace." .Values.marketplace.productCode | quote }}
+            - name: AWS_MARKETPLACE_PRODUCT_SKU
+              value: {{ required "marketplace.productSku is required. Subscribe on AWS Marketplace." .Values.marketplace.productSku | quote }}
             - name: ALIGNR_SKIP_SEED
               value: "true"
             - name: ALIGNR_HOST_SCANS_ENABLED

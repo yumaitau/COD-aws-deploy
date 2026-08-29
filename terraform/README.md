@@ -6,12 +6,12 @@ This is the template most buyers should run. For Multi-AZ, CMK, WAF, and log/aud
 
 ```sh
 cp terraform.tfvars.example terraform.tfvars
-# set container_image and license_key
+# set container_image, license_key, marketplace_product_code, marketplace_product_sku
 terraform init
 terraform apply
 ```
 
-Required: `container_image` (sha256 digest) and `license_key`.
+Required: `container_image` (sha256 digest), `license_key`, `marketplace_product_code`, and `marketplace_product_sku`. There is no license bypass.
 
 Optional: `domain`, `certificate_arn`, `allowed_ingress_cidrs` (VPN / shared-services; never `0.0.0.0/0`).
 

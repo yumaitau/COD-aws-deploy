@@ -69,9 +69,10 @@ Edit `terraform.tfvars`:
 
 1. Set `container_image` to the Marketplace ECR digest. `latest` is rejected.
 2. Set `license_key` to the signed JWT. Do not commit the real value.
-3. Leave `domain` empty to use the internal ALB DNS name, or set the hostname operators will type.
-4. Leave `allowed_ingress_cidrs` empty to allow only the VPC CIDR. Add a VPN or shared-services CIDR if you have one. Do not use `0.0.0.0/0`.
-5. Optionally set `certificate_arn` for HTTPS on the internal ALB.
+3. Set `marketplace_product_code` and `marketplace_product_sku` from the AWS Marketplace listing. The image checks entitlement at boot. There is no skip flag.
+4. Leave `domain` empty to use the internal ALB DNS name, or set the hostname operators will type.
+5. Leave `allowed_ingress_cidrs` empty to allow only the VPC CIDR. Add a VPN or shared-services CIDR if you have one. Do not use `0.0.0.0/0`.
+6. Optionally set `certificate_arn` for HTTPS on the internal ALB.
 
 ```sh
 terraform init
@@ -114,14 +115,14 @@ Full variable notes: [`terraform/README.md`](terraform/README.md).
 
 Same lean stack as the default Terraform. No Well-Architected extras.
 
-Console: Create stack → Upload `cloudformation/cod-fargate.yaml` → set **ContainerImage** and **LicenseKey** → acknowledge IAM → Create.
+Console: Create stack → Upload `cloudformation/cod-fargate.yaml` → set **ContainerImage**, **LicenseKey**, **MarketplaceProductCode**, and **MarketplaceProductSku** → acknowledge IAM → Create.
 
 CLI:
 
 ```sh
 cd cloudformation
 cp parameters.example.json parameters.json
-# edit ContainerImage and LicenseKey
+# edit ContainerImage, LicenseKey, MarketplaceProductCode, MarketplaceProductSku
 
 aws cloudformation deploy \
   --region ap-southeast-2 \
@@ -150,7 +151,7 @@ Adds:
 ```sh
 cd terraform-well-architected
 cp terraform.tfvars.example terraform.tfvars
-# set container_image and license_key
+# set container_image, license_key, marketplace_product_code, marketplace_product_sku
 terraform init
 terraform apply
 ```
@@ -170,6 +171,8 @@ helm upgrade --install cod charts/cod --namespace cod --create-namespace \
   --set image.repository='<marketplace-ecr>' \
   --set image.digest='sha256:<digest>' \
   --set licenseKey='<signed-jwt>' \
+  --set marketplace.productCode='<listing-product-code>' \
+  --set marketplace.productSku='<listing-product-id>' \
   --set databaseUrl='postgresql://cod:...@...:5432/cod?schema=public&sslmode=verify-full' \
   --set redisUrl='rediss://:...@...:6379' \
   --set domain='cod.example.com'
@@ -190,9 +193,10 @@ Settings shows a licence fingerprint only. It never prints the raw JWT.
 
 ## Licence and image pin
 
+- Subscribe on AWS Marketplace before you pull or deploy. The image calls License Manager `CheckoutLicense` at boot.
 - Pin `@sha256:<digest>`. Templates reject `latest`.
+- Pass the listing **product code** and **product ID** (`marketplace_product_code` / `MarketplaceProductCode` and `marketplace_product_sku` / `MarketplaceProductSku`). Empty values fail closed. There is no development-license or enforce-false switch.
 - Pass the signed JWT as `license_key` / `LicenseKey`. Store it in Secrets Manager.
-- `ALIGNR_DEV_LICENSE` must stay `false` on Marketplace stacks.
 
 RDS connections use `sslmode=verify-full` with the Amazon RDS global CA bundle baked into the image (`NODE_EXTRA_CA_CERTS` / `PGSSLROOTCERT`).
 
@@ -262,7 +266,8 @@ The COD image reads these process environment names. Terraform, CloudFormation, 
 | `ALIGNR_SETUP_TOKEN` | One-time first admin |
 | `ALIGNR_INSTALL_ID` | Binds cached licence attestations to this deploy |
 | `ALIGNR_DOMAIN` | Hostname for links and cookies |
-| `ALIGNR_DEV_LICENSE` | Must be `false` on Marketplace stacks |
+| `AWS_MARKETPLACE_PRODUCT_CODE` | Listing product code (required) |
+| `AWS_MARKETPLACE_PRODUCT_SKU` | Listing product ID (required) |
 | `HOSTNAME` / `PORT` | `0.0.0.0:3000` |
 
 Health: `GET /api/health` — 200 when the database is up and the licence is not locked; 503 if the licence is locked or the system is critical.
@@ -274,7 +279,7 @@ Do not put long-lived AWS keys in the task definition. Per-workspace cloud-scan 
 | Role | Purpose |
 | --- | --- |
 | Execution | Pull the image, write logs, `secretsmanager:GetSecretValue` |
-| Task | ECS Exec (`ssmmessages:*`). Attach extra policies in the buyer account if tasks must call your own AWS APIs |
+| Task | ECS Exec (`ssmmessages:*`) and License Manager (`CheckoutLicense`, `GetLicense`, `ExtendLicenseConsumption`, `ListReceivedLicenses`). Attach extra policies in the buyer account if tasks must call your own AWS APIs |
 
 ## Support
 

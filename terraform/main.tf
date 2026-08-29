@@ -338,17 +338,30 @@ resource "aws_iam_role_policy" "task_exec" {
   role = aws_iam_role.task.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "EcsExec"
-      Effect = "Allow"
-      Action = [
-        "ssmmessages:CreateControlChannel",
-        "ssmmessages:CreateDataChannel",
-        "ssmmessages:OpenControlChannel",
-        "ssmmessages:OpenDataChannel"
-      ]
-      Resource = "*"
-    }]
+    Statement = [
+      {
+        Sid    = "EcsExec"
+        Effect = "Allow"
+        Action = [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AwsMarketplaceLicense"
+        Effect = "Allow"
+        Action = [
+          "license-manager:CheckoutLicense",
+          "license-manager:GetLicense",
+          "license-manager:ExtendLicenseConsumption",
+          "license-manager:ListReceivedLicenses"
+        ]
+        Resource = "*"
+      },
+    ]
   })
 }
 
@@ -368,7 +381,8 @@ locals {
     { name = "ALIGNR_DOMAIN", value = var.domain != "" ? var.domain : aws_lb.app.dns_name },
     { name = "BETTER_AUTH_URL", value = local.app_url },
     { name = "AWS_REGION", value = var.aws_region },
-    { name = "ALIGNR_DEV_LICENSE", value = "false" },
+    { name = "AWS_MARKETPLACE_PRODUCT_CODE", value = var.marketplace_product_code },
+    { name = "AWS_MARKETPLACE_PRODUCT_SKU", value = var.marketplace_product_sku },
     { name = "AI_PROVIDER", value = "disabled" },
   ]
   shared_secrets = [
