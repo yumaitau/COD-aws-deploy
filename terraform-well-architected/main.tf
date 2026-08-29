@@ -406,15 +406,15 @@ resource "aws_iam_role_policy" "task_exec" {
         Sid    = "AwsMarketplaceLicense"
         Effect = "Allow"
         Action = [
-        "license-manager:CheckoutLicense",
-        "license-manager:GetLicense",
-        "license-manager:CheckInLicense",
-        "license-manager:ExtendLicenseConsumption",
-        "license-manager:ListReceivedLicenses"
-      ]
-      # AWS Marketplace License Manager APIs do not support resource-level ARNs.
-      Resource = "*"
-    },
+          "license-manager:CheckoutLicense",
+          "license-manager:GetLicense",
+          "license-manager:CheckInLicense",
+          "license-manager:ExtendLicenseConsumption",
+          "license-manager:ListReceivedLicenses"
+        ]
+        # AWS Marketplace License Manager APIs do not support resource-level ARNs.
+        Resource = "*"
+      },
     ]
   })
 }
