@@ -275,6 +275,10 @@ Do not put long-lived AWS keys in the task definition. Per-workspace cloud-scan 
 | Execution | Pull the image, write logs, `secretsmanager:GetSecretValue` |
 | Task | ECS Exec (`ssmmessages:*`) and License Manager (`CheckoutLicense`, `GetLicense`, `CheckInLicense`, `ExtendLicenseConsumption`, `ListReceivedLicenses`; Resource `*` is required by AWS). Attach extra policies in the buyer account if tasks must call your own AWS APIs |
 
+## CI
+
+Pushes and pull requests to `main` run [`.github/workflows/security.yml`](.github/workflows/security.yml): Terraform fmt and validate, Helm lint, Checkov, Gitleaks, dependency-review, and Trivy.
+
 ## Support
 
 https://complianceondemand.com.au
