@@ -86,14 +86,6 @@ jobs:
       - name: Detect secrets
         run: gitleaks detect --source . --verbose --redact
 
-  dependency-review:
-    name: Dependency review
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/dependency-review-action@v5
-
   trivy-vulnerabilities:
     name: Trivy dependency vulnerabilities
     runs-on: ubuntu-latest

@@ -277,7 +277,7 @@ Do not put long-lived AWS keys in the task definition. Per-workspace cloud-scan 
 
 ## CI
 
-Pushes and pull requests to `main` run [`.github/workflows/security.yml`](.github/workflows/security.yml): Terraform fmt and validate, Helm lint, Checkov, Gitleaks, dependency-review, and Trivy.
+Pushes and pull requests to `main` run [`.github/workflows/security.yml`](.github/workflows/security.yml): Terraform fmt and validate, Helm lint, Checkov, Gitleaks, and Trivy.
 
 ## Support
 
