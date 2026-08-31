@@ -133,6 +133,7 @@ resource "aws_route_table_association" "data" {
 }
 
 resource "aws_security_group" "alb" {
+  #checkov:skip=CKV_AWS_382:NAT egress is required for ACM/OIDC health and operator VPN paths
   name        = "${local.name}-alb"
   description = "Internal ALB"
   vpc_id      = aws_vpc.this.id
@@ -155,6 +156,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_security_group" "app" {
+  #checkov:skip=CKV_AWS_382:Workers must reach public cloud/SaaS APIs through the NAT gateway
   name        = "${local.name}-app"
   description = "COD app and worker"
   vpc_id      = aws_vpc.this.id
@@ -209,9 +211,36 @@ resource "aws_db_subnet_group" "this" {
   subnet_ids = aws_subnet.data[*].id
 }
 
+resource "aws_iam_role" "rds_monitoring" {
+  name = "${local.name}-rds-monitoring"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "monitoring.rds.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+  role       = aws_iam_role.rds_monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
 resource "aws_db_parameter_group" "this" {
   name   = "${local.name}-pg16"
   family = "postgres16"
+
+  parameter {
+    name  = "log_statement"
+    value = "ddl"
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  }
 
   parameter {
     name         = "rds.force_ssl"
@@ -221,26 +250,34 @@ resource "aws_db_parameter_group" "this" {
 }
 
 resource "aws_db_instance" "this" {
-  identifier                      = "${local.name}-pg"
-  engine                          = "postgres"
-  engine_version                  = "16"
-  instance_class                  = var.db_instance_class
-  allocated_storage               = 50
-  db_name                         = "cod"
-  username                        = "cod"
-  password                        = random_password.db.result
-  db_subnet_group_name            = aws_db_subnet_group.this.name
-  parameter_group_name            = aws_db_parameter_group.this.name
-  vpc_security_group_ids          = [aws_security_group.db.id]
-  storage_encrypted               = true
-  publicly_accessible             = false
-  multi_az                        = false
-  backup_retention_period         = 7
-  deletion_protection             = false
-  skip_final_snapshot             = true
-  auto_minor_version_upgrade      = true
-  copy_tags_to_snapshot           = true
-  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+  identifier                            = "${local.name}-pg"
+  engine                                = "postgres"
+  engine_version                        = "16"
+  instance_class                        = var.db_instance_class
+  allocated_storage                     = 50
+  db_name                               = "cod"
+  username                              = "cod"
+  password                              = random_password.db.result
+  db_subnet_group_name                  = aws_db_subnet_group.this.name
+  parameter_group_name                  = aws_db_parameter_group.this.name
+  vpc_security_group_ids                = [aws_security_group.db.id]
+  storage_encrypted                     = true
+  kms_key_id                            = aws_kms_key.this.arn
+  publicly_accessible                   = false
+  multi_az                              = true
+  backup_retention_period               = 7
+  deletion_protection                   = true
+  skip_final_snapshot                   = false
+  final_snapshot_identifier             = "${local.name}-pg-final"
+  performance_insights_enabled          = true
+  performance_insights_kms_key_id       = aws_kms_key.this.arn
+  performance_insights_retention_period = 7
+  monitoring_interval                   = 60
+  monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
+  iam_database_authentication_enabled   = true
+  auto_minor_version_upgrade            = true
+  copy_tags_to_snapshot                 = true
+  enabled_cloudwatch_logs_exports       = ["postgresql", "upgrade"]
 }
 
 resource "aws_elasticache_subnet_group" "this" {
@@ -254,18 +291,25 @@ resource "aws_elasticache_replication_group" "this" {
   engine                     = "redis"
   engine_version             = "7.1"
   node_type                  = var.redis_node_type
-  num_cache_clusters         = 1
+  num_cache_clusters         = 2
+  automatic_failover_enabled = true
+  multi_az_enabled           = true
   port                       = 6379
   subnet_group_name          = aws_elasticache_subnet_group.this.name
   security_group_ids         = [aws_security_group.redis.id]
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
+  kms_key_id                 = aws_kms_key.this.arn
   auth_token                 = random_password.redis.result
+  snapshot_retention_limit   = 7
+  snapshot_window            = "16:00-17:00"
 }
 
 resource "aws_secretsmanager_secret" "runtime" {
+  #checkov:skip=CKV2_AWS_57:Postgres password rotation lives in terraform-well-architected; this stack keeps a static generated secret
   name                    = "${local.name}/runtime"
-  recovery_window_in_days = 0
+  kms_key_id              = aws_kms_key.this.arn
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "runtime" {
@@ -279,16 +323,6 @@ resource "aws_secretsmanager_secret_version" "runtime" {
     ALIGNR_INSTALL_ID     = random_id.install.hex
     ALIGNR_LICENSE_KEY    = var.license_key
   })
-}
-
-resource "aws_cloudwatch_log_group" "app" {
-  name              = "/ecs/${local.name}/app"
-  retention_in_days = 30
-}
-
-resource "aws_cloudwatch_log_group" "worker" {
-  name              = "/ecs/${local.name}/worker"
-  retention_in_days = 30
 }
 
 resource "aws_iam_role" "execution" {
@@ -313,11 +347,18 @@ resource "aws_iam_role_policy" "execution_secrets" {
   role = aws_iam_role.execution.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = [aws_secretsmanager_secret.runtime.arn]
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.runtime.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:DescribeKey"]
+        Resource = [aws_kms_key.this.arn]
+      },
+    ]
   })
 }
 
@@ -334,6 +375,9 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_iam_role_policy" "task_exec" {
+  #checkov:skip=CKV_AWS_111:ECS Exec SSM channels do not support resource-level ARNs
+  #checkov:skip=CKV_AWS_356:ECS Exec SSM channels do not support resource-level ARNs
+  #checkov:skip=CKV_AWS_355:License Manager CheckoutLicense and ECS Exec SSM APIs require Resource *
   name = "${local.name}-ecs-exec"
   role = aws_iam_role.task.id
   policy = jsonencode({
@@ -354,15 +398,15 @@ resource "aws_iam_role_policy" "task_exec" {
         Sid    = "AwsMarketplaceLicense"
         Effect = "Allow"
         Action = [
-        "license-manager:CheckoutLicense",
-        "license-manager:GetLicense",
-        "license-manager:CheckInLicense",
-        "license-manager:ExtendLicenseConsumption",
-        "license-manager:ListReceivedLicenses"
-      ]
-      # AWS Marketplace License Manager APIs do not support resource-level ARNs.
-      Resource = "*"
-    },
+          "license-manager:CheckoutLicense",
+          "license-manager:GetLicense",
+          "license-manager:CheckInLicense",
+          "license-manager:ExtendLicenseConsumption",
+          "license-manager:ListReceivedLicenses"
+        ]
+        # AWS Marketplace License Manager APIs do not support resource-level ARNs.
+        Resource = "*"
+      },
     ]
   })
 }
@@ -376,7 +420,7 @@ resource "aws_ecs_cluster" "this" {
 }
 
 locals {
-  shared_environment = [
+  shared_environment = concat([
     { name = "NODE_ENV", value = "production" },
     { name = "HOSTNAME", value = "0.0.0.0" },
     { name = "PORT", value = "3000" },
@@ -384,7 +428,7 @@ locals {
     { name = "BETTER_AUTH_URL", value = local.app_url },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "AI_PROVIDER", value = "disabled" },
-  ]
+  ], local.sbom_cli_environment, local.storage_environment)
   shared_secrets = [
     { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.runtime.arn}:DATABASE_URL::" },
     { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.runtime.arn}:REDIS_URL::" },
@@ -410,6 +454,18 @@ resource "aws_ecs_task_definition" "app" {
     cpu_architecture        = "X86_64"
   }
 
+  volume {
+    name = "app-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.data.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.data.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([{
     name      = "app"
     image     = var.container_image
@@ -421,8 +477,9 @@ resource "aws_ecs_task_definition" "app" {
     }]
     environment = concat(local.shared_environment, [{ name = "ALIGNR_LOG_SERVICE", value = "cod-app" }])
     secrets     = local.shared_secrets
+    mountPoints = [local.data_mount]
     healthCheck = {
-      command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500||r.status===503?0:1)).catch(()=>process.exit(1))\""]
+      command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health?probe=live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval    = 30
       timeout     = 10
       retries     = 5
@@ -453,6 +510,18 @@ resource "aws_ecs_task_definition" "worker" {
     cpu_architecture        = "X86_64"
   }
 
+  volume {
+    name = "app-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.data.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.data.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([{
     name        = "worker"
     image       = var.container_image
@@ -460,6 +529,7 @@ resource "aws_ecs_task_definition" "worker" {
     command     = ["node", "dist/worker-main.js"]
     environment = concat(local.shared_environment, [{ name = "ALIGNR_LOG_SERVICE", value = "cod-worker" }])
     secrets     = local.shared_secrets
+    mountPoints = [local.data_mount]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -478,6 +548,16 @@ resource "aws_lb" "app" {
   security_groups            = [aws_security_group.alb.id]
   subnets                    = aws_subnet.private[*].id
   drop_invalid_header_fields = true
+  enable_deletion_protection = true
+  desync_mitigation_mode     = "strictest"
+
+  access_logs {
+    bucket  = aws_s3_bucket.alb_logs.id
+    prefix  = "alb"
+    enabled = true
+  }
+
+  depends_on = [aws_s3_bucket_policy.alb_logs]
 }
 
 resource "aws_lb_target_group" "app" {
@@ -487,8 +567,8 @@ resource "aws_lb_target_group" "app" {
   vpc_id      = aws_vpc.this.id
   target_type = "ip"
   health_check {
-    path                = "/api/health"
-    matcher             = "200-503"
+    path                = "/api/health?probe=live"
+    matcher             = "200"
     interval            = 30
     healthy_threshold   = 2
     unhealthy_threshold = 3
@@ -496,6 +576,7 @@ resource "aws_lb_target_group" "app" {
 }
 
 resource "aws_lb_listener" "app" {
+  #checkov:skip=CKV2_AWS_20:HTTPS is used when certificate_arn is set; VPC-only HTTP is the ACM-less bootstrap
   load_balancer_arn = aws_lb.app.arn
   port              = local.alb_port
   protocol          = local.alb_protocol
@@ -509,12 +590,18 @@ resource "aws_lb_listener" "app" {
 }
 
 resource "aws_ecs_service" "app" {
-  name                   = "${local.name}-app"
-  cluster                = aws_ecs_cluster.this.id
-  task_definition        = aws_ecs_task_definition.app.arn
-  desired_count          = 1
-  launch_type            = "FARGATE"
-  enable_execute_command = true
+  name                              = "${local.name}-app"
+  cluster                           = aws_ecs_cluster.this.id
+  task_definition                   = aws_ecs_task_definition.app.arn
+  desired_count                     = 1
+  launch_type                       = "FARGATE"
+  enable_execute_command            = true
+  health_check_grace_period_seconds = 180
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     subnets          = aws_subnet.private[*].id
@@ -528,7 +615,7 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 
-  depends_on = [aws_lb_listener.app, aws_secretsmanager_secret_version.runtime]
+  depends_on = [aws_lb_listener.app, aws_secretsmanager_secret_version.runtime, aws_efs_mount_target.data]
 }
 
 resource "aws_ecs_service" "worker" {
@@ -545,5 +632,5 @@ resource "aws_ecs_service" "worker" {
     assign_public_ip = false
   }
 
-  depends_on = [aws_secretsmanager_secret_version.runtime]
+  depends_on = [aws_secretsmanager_secret_version.runtime, aws_efs_mount_target.data]
 }

@@ -36,3 +36,13 @@ output "access_note" {
 output "destroy_note" {
   value = "Before terraform destroy, set deletion_protection=false on the RDS instance and enable_deletion_protection=false on the ALB, then apply. Secrets keep a 7-day recovery window. RDS writes a final snapshot named <name-prefix>-pg-final."
 }
+
+output "sbom_cli_bucket" {
+  description = "S3 bucket that holds signed SBOM CLI binaries under sbom-cli/. Drop files in terraform/sbom-cli/ or set sbom_cli_artifact_dir."
+  value       = aws_s3_bucket.sbom_cli.id
+}
+
+output "backup_bucket" {
+  description = "Private S3 bucket for in-app Postgres dumps (ALIGNR_BACKUP_DESTINATION)."
+  value       = aws_s3_bucket.backups.id
+}

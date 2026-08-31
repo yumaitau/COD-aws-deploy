@@ -1,0 +1,8 @@
+# Remaining exceptions after Checkov hardening of the default buyer stack.
+# Raw Checkov still uses the inline #checkov:skip comments in *.tf.
+compact: true
+framework:
+  - terraform
+skip-check:
+  - CKV_AWS_382
+soft-fail: false

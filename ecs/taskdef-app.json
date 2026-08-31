@@ -1,5 +1,5 @@
 {
-  "family": "cod-app",
+  "family": "alignr-app",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
@@ -10,6 +10,19 @@
   },
   "executionRoleArn": "REPLACED_AT_DEPLOY",
   "taskRoleArn": "REPLACED_AT_DEPLOY",
+  "volumes": [
+    {
+      "name": "app-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "REPLACED_AT_DEPLOY",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "REPLACED_AT_DEPLOY",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ],
   "containerDefinitions": [
     {
       "name": "app",
@@ -17,14 +30,30 @@
       "essential": true,
       "command": ["node", "server.js"],
       "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "mountPoints": [
+        {
+          "sourceVolume": "app-data",
+          "containerPath": "/app/data",
+          "readOnly": false
+        }
+      ],
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
         { "name": "HOSTNAME", "value": "0.0.0.0" },
         { "name": "PORT", "value": "3000" },
         { "name": "ALIGNR_LOG_SERVICE", "value": "cod-app" },
+        { "name": "ALIGNR_DOMAIN", "value": "REPLACED_AT_DEPLOY" },
+        { "name": "BETTER_AUTH_URL", "value": "REPLACED_AT_DEPLOY" },
+        { "name": "AWS_REGION", "value": "ap-southeast-2" },
         { "name": "AI_PROVIDER", "value": "disabled" },
         { "name": "AI_ENABLED", "value": "false" },
-        { "name": "ALIGNR_HOST_SCANS_ENABLED", "value": "false" }
+        { "name": "ALIGNR_HOST_SCANS_ENABLED", "value": "true" },
+        { "name": "SECURITY_DOCUMENT_STORAGE_DIR", "value": "/app/data/security-documents" },
+        { "name": "ASSESSOR_PACK_STORAGE_DIR", "value": "/app/data/assessor-packs" },
+        { "name": "BRANDING_ASSET_STORAGE_DIR", "value": "/app/data/branding-assets" },
+        { "name": "ALIGNR_BACKUP_DESTINATION", "value": "s3://REPLACED_AT_DEPLOY/nightly" },
+        { "name": "SBOM_CLI_S3_BUCKET", "value": "REPLACED_AT_DEPLOY" },
+        { "name": "SBOM_CLI_DOWNLOAD_BASE", "value": "REPLACED_AT_DEPLOY" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "SECRET_ARN:DATABASE_URL::" },
@@ -32,12 +61,13 @@
         { "name": "BETTER_AUTH_SECRET", "valueFrom": "SECRET_ARN:BETTER_AUTH_SECRET::" },
         { "name": "ENCRYPTION_MASTER_KEY", "valueFrom": "SECRET_ARN:ENCRYPTION_MASTER_KEY::" },
         { "name": "ALIGNR_SETUP_TOKEN", "valueFrom": "SECRET_ARN:ALIGNR_SETUP_TOKEN::" },
+        { "name": "ALIGNR_INSTALL_ID", "valueFrom": "SECRET_ARN:ALIGNR_INSTALL_ID::" },
         { "name": "ALIGNR_LICENSE_KEY", "valueFrom": "SECRET_ARN:ALIGNR_LICENSE_KEY::" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/cod",
+          "awslogs-group": "/ecs/alignr",
           "awslogs-region": "ap-southeast-2",
           "awslogs-stream-prefix": "app"
         }
@@ -45,7 +75,7 @@
       "healthCheck": {
         "command": [
           "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500||r.status===503?0:1)).catch(()=>process.exit(1))\""
+          "node -e \"fetch('http://127.0.0.1:3000/api/health?probe=live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
         ],
         "interval": 30,
         "timeout": 10,

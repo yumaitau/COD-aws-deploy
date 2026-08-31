@@ -4,7 +4,7 @@ Opt-in template. Higher AWS spend than [`../terraform/`](../terraform/). Use thi
 
 Adds:
 
-- **Reliability:** NAT per AZ, Multi-AZ RDS and Redis, two app tasks, deletion protection, final snapshot
+- **Reliability:** NAT per AZ, Multi-AZ RDS and Redis, deletion protection, final snapshot. App desired count stays 1 (Marketplace seat is Count=1).
 - **Security:** customer-managed KMS, forced Postgres TLS, IAM DB auth, WAF, VPC flow logs, 365-day encrypted logs
 - **Operational excellence:** ALB access logs, Performance Insights, enhanced monitoring, Postgres DDL/slow-query logs
 - **Rotation:** Secrets Manager rotates the Postgres password only. Session and encryption keys are never rotated.

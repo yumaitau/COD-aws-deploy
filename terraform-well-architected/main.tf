@@ -308,6 +308,8 @@ resource "aws_elasticache_replication_group" "this" {
   transit_encryption_enabled = true
   kms_key_id                 = aws_kms_key.this.arn
   auth_token                 = random_password.redis.result
+  snapshot_retention_limit   = 7
+  snapshot_window            = "16:00-17:00"
 }
 
 resource "aws_secretsmanager_secret" "runtime" {
@@ -386,6 +388,7 @@ resource "aws_iam_role" "task" {
 resource "aws_iam_role_policy" "task_exec" {
   #checkov:skip=CKV_AWS_111:ECS Exec SSM channels do not support resource-level ARNs
   #checkov:skip=CKV_AWS_356:ECS Exec SSM channels do not support resource-level ARNs
+  #checkov:skip=CKV_AWS_355:License Manager CheckoutLicense and ECS Exec SSM APIs require Resource *
   name = "${local.name}-ecs-exec"
   role = aws_iam_role.task.id
   policy = jsonencode({
@@ -406,15 +409,15 @@ resource "aws_iam_role_policy" "task_exec" {
         Sid    = "AwsMarketplaceLicense"
         Effect = "Allow"
         Action = [
-        "license-manager:CheckoutLicense",
-        "license-manager:GetLicense",
-        "license-manager:CheckInLicense",
-        "license-manager:ExtendLicenseConsumption",
-        "license-manager:ListReceivedLicenses"
-      ]
-      # AWS Marketplace License Manager APIs do not support resource-level ARNs.
-      Resource = "*"
-    },
+          "license-manager:CheckoutLicense",
+          "license-manager:GetLicense",
+          "license-manager:CheckInLicense",
+          "license-manager:ExtendLicenseConsumption",
+          "license-manager:ListReceivedLicenses"
+        ]
+        # AWS Marketplace License Manager APIs do not support resource-level ARNs.
+        Resource = "*"
+      },
     ]
   })
 }
@@ -428,7 +431,7 @@ resource "aws_ecs_cluster" "this" {
 }
 
 locals {
-  shared_environment = [
+  shared_environment = concat([
     { name = "NODE_ENV", value = "production" },
     { name = "HOSTNAME", value = "0.0.0.0" },
     { name = "PORT", value = "3000" },
@@ -436,7 +439,7 @@ locals {
     { name = "BETTER_AUTH_URL", value = local.app_url },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "AI_PROVIDER", value = "disabled" },
-  ]
+  ], local.sbom_cli_environment, local.storage_environment)
   shared_secrets = [
     { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.runtime.arn}:DATABASE_URL::" },
     { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.runtime.arn}:REDIS_URL::" },
@@ -462,6 +465,18 @@ resource "aws_ecs_task_definition" "app" {
     cpu_architecture        = "X86_64"
   }
 
+  volume {
+    name = "app-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.data.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.data.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([{
     name      = "app"
     image     = var.container_image
@@ -473,8 +488,9 @@ resource "aws_ecs_task_definition" "app" {
     }]
     environment = concat(local.shared_environment, [{ name = "ALIGNR_LOG_SERVICE", value = "cod-app" }])
     secrets     = local.shared_secrets
+    mountPoints = [local.data_mount]
     healthCheck = {
-      command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500||r.status===503?0:1)).catch(()=>process.exit(1))\""]
+      command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health?probe=live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval    = 30
       timeout     = 10
       retries     = 5
@@ -505,6 +521,18 @@ resource "aws_ecs_task_definition" "worker" {
     cpu_architecture        = "X86_64"
   }
 
+  volume {
+    name = "app-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.data.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.data.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([{
     name        = "worker"
     image       = var.container_image
@@ -512,6 +540,7 @@ resource "aws_ecs_task_definition" "worker" {
     command     = ["node", "dist/worker-main.js"]
     environment = concat(local.shared_environment, [{ name = "ALIGNR_LOG_SERVICE", value = "cod-worker" }])
     secrets     = local.shared_secrets
+    mountPoints = [local.data_mount]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -549,8 +578,8 @@ resource "aws_lb_target_group" "app" {
   vpc_id      = aws_vpc.this.id
   target_type = "ip"
   health_check {
-    path                = "/api/health"
-    matcher             = "200-503"
+    path                = "/api/health?probe=live"
+    matcher             = "200"
     interval            = 30
     healthy_threshold   = 2
     unhealthy_threshold = 3
@@ -572,12 +601,18 @@ resource "aws_lb_listener" "app" {
 }
 
 resource "aws_ecs_service" "app" {
-  name                   = "${local.name}-app"
-  cluster                = aws_ecs_cluster.this.id
-  task_definition        = aws_ecs_task_definition.app.arn
-  desired_count          = 2
-  launch_type            = "FARGATE"
-  enable_execute_command = true
+  name                              = "${local.name}-app"
+  cluster                           = aws_ecs_cluster.this.id
+  task_definition                   = aws_ecs_task_definition.app.arn
+  desired_count                     = 1
+  launch_type                       = "FARGATE"
+  enable_execute_command            = true
+  health_check_grace_period_seconds = 180
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     subnets          = aws_subnet.private[*].id
@@ -591,7 +626,7 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 
-  depends_on = [aws_lb_listener.app, aws_secretsmanager_secret_version.runtime]
+  depends_on = [aws_lb_listener.app, aws_secretsmanager_secret_version.runtime, aws_efs_mount_target.data]
 }
 
 resource "aws_ecs_service" "worker" {
@@ -608,5 +643,5 @@ resource "aws_ecs_service" "worker" {
     assign_public_ip = false
   }
 
-  depends_on = [aws_secretsmanager_secret_version.runtime]
+  depends_on = [aws_secretsmanager_secret_version.runtime, aws_efs_mount_target.data]
 }

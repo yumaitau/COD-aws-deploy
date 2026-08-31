@@ -1,0 +1,36 @@
+compact: true
+directory:
+  - terraform
+  - terraform-well-architected
+  - cloudformation
+framework:
+  - terraform
+  - cloudformation
+download-external-modules: false
+skip-path:
+  - terraform/.terraform
+  - terraform-well-architected/.terraform
+  - charts
+# Residual checks that stay buyer-optional or would break first-launch.
+# Ingress 0.0.0.0/0 is not skipped — it is rejected unless explicitly opted in.
+skip-check:
+  - CKV_AWS_2 # HTTP listener is first-launch only; HTTPS when a certificate is set
+  - CKV_AWS_103 # same HTTP listener
+  - CKV2_AWS_20 # HTTP to HTTPS redirect activates when certificate_arn is set
+  - CKV_AWS_157 # Multi-AZ is an opt-in on the lean CloudFormation stack
+  - CKV_AWS_293 # RDS deletion protection is an opt-in on the lean stack
+  - CKV_AWS_353 # Performance Insights cost on small instances
+  - CKV_AWS_118 # Enhanced monitoring extra role and cost
+  - CKV_AWS_338 # Documented default is 30-day log retention on the lean stack
+  - CKV_AWS_336 # Next.js / worker need writable tmp; image is not verified read-only
+  - CKV_AWS_150 # ALB deletion protection blocks test teardown on the lean stack
+  - CKV2_AWS_62 # No event consumer for evidence objects
+  - CKV_AWS_144 # Cross-region replication is buyer-owned DR
+  - CKV2_AWS_57 # Secrets Manager rotation lives in terraform-well-architected
+  - CKV_AWS_378 # Target group HTTP is intended; TLS terminates on the ALB
+  - CKV2_AWS_50 # Redis Multi-AZ is an opt-in on the lean stack
+  - CKV_AWS_161 # App authenticates to Postgres with Secrets Manager, not IAM DB auth
+  - CKV2_AWS_30 # postgresql and upgrade logs are already exported
+  - CKV_AWS_382 # Required NAT egress for outbound cloud/SaaS scans
+  - CKV_AWS_355 # License Manager and ECS Exec APIs do not support resource ARNs
+  - CKV_AWS_356 # License Manager CheckoutLicense APIs do not support resource ARNs
