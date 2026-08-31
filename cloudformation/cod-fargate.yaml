@@ -6,9 +6,9 @@ Description: >-
 Parameters:
   ContainerImage:
     Type: String
-    Description: Marketplace ECR image digest. Must be sha256-pinned. latest is rejected.
-    AllowedPattern: '^(?!.*:[Ll][Aa][Tt][Ee][Ss][Tt]).+@sha256:[0-9a-f]{64}$'
-    ConstraintDescription: Image must end in @sha256:<64 hex> and must not use the latest tag.
+    Description: Marketplace ECR digest (@sha256:...) or immutable tag (:1.0.N or :sha-<7>). latest is rejected.
+    AllowedPattern: '^(?!.*:[Ll][Aa][Tt][Ee][Ss][Tt]).+(?:@sha256:[0-9a-f]{64}|:[0-9]+\.[0-9]+\.[0-9]+|:sha-[0-9a-f]{7}(?:-amd64|-arm64)?)$'
+    ConstraintDescription: Image must be a digest or immutable tag. latest is not allowed.
   LicenseKey:
     Type: String
     NoEcho: true
@@ -20,6 +20,14 @@ Parameters:
   VpcCidr:
     Type: String
     Default: 10.80.0.0/16
+
+Rules:
+  AustraliaOnly:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref "AWS::Region", ap-southeast-2]
+          - !Equals [!Ref "AWS::Region", ap-southeast-4]
+        AssertDescription: Deploy this stack in Australia (ap-southeast-2 Sydney or ap-southeast-4 Melbourne).
 
 Resources:
   Vpc:
@@ -223,6 +231,14 @@ Resources:
         PasswordLength: 24
         ExcludePunctuation: true
 
+  DbParams:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Force SSL for COD Postgres
+      Family: postgres16
+      Parameters:
+        rds.force_ssl: "1"
+
   Database:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -235,6 +251,7 @@ Resources:
       MasterUsername: cod
       MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbPassword}:SecretString}}"
       DBSubnetGroupName: !Ref DbSubnetGroup
+      DBParameterGroupName: !Ref DbParams
       VPCSecurityGroups:
         - !Ref DbSg
       StorageEncrypted: true
@@ -265,6 +282,8 @@ Resources:
         - !Ref RedisSg
       AtRestEncryptionEnabled: true
       TransitEncryptionEnabled: true
+      SnapshotRetentionLimit: 7
+      SnapshotWindow: "16:00-17:00"
       AuthToken: !Sub "{{resolve:secretsmanager:${RedisAuth}:SecretString}}"
 
   AuthSecret:
@@ -306,6 +325,134 @@ Resources:
           RedisHost: !GetAtt Redis.PrimaryEndPoint.Address
           Install: !Ref AWS::StackName
           License: !Ref LicenseKey
+
+  SbomCliBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${NamePrefix}-${AWS::AccountId}-sbom-cli
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  SbomCliBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SbomCliBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt SbomCliBucket.Arn
+              - !Sub ${SbomCliBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: SbomCliPublicGet
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub ${SbomCliBucket.Arn}/sbom-cli/*
+
+  EfsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NFS from COD tasks
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: App and worker to EFS
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref AppSg
+
+  DataFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub ${NamePrefix}-data
+      BackupPolicy:
+        Status: ENABLED
+
+  DataMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref DataFileSystem
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroups:
+        - !Ref EfsSg
+
+  DataMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref DataFileSystem
+      SubnetId: !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref EfsSg
+
+  DataAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref DataFileSystem
+      PosixUser:
+        Uid: "1001"
+        Gid: "1001"
+      RootDirectory:
+        Path: /alignr
+        CreationInfo:
+          OwnerUid: "1001"
+          OwnerGid: "1001"
+          Permissions: "0755"
+
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${NamePrefix}-${AWS::AccountId}-backups
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire
+            Status: Enabled
+            ExpirationInDays: 90
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
 
   ExecutionRole:
     Type: AWS::IAM::Role
@@ -354,6 +501,45 @@ Resources:
                   - ssmmessages:OpenControlChannel
                   - ssmmessages:OpenDataChannel
                 Resource: "*"
+        - PolicyName: sbom-cli
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SbomCliGet
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt SbomCliBucket.Arn
+                  - !Sub ${SbomCliBucket.Arn}/sbom-cli/*
+        - PolicyName: storage
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EfsClient
+                Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                Resource: !GetAtt DataFileSystem.Arn
+                Condition:
+                  StringEquals:
+                    elasticfilesystem:AccessPointArn: !GetAtt DataAccessPoint.Arn
+              - Sid: BackupBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt BackupBucket.Arn
+                  - !Sub ${BackupBucket.Arn}/*
+        - PolicyName: marketplace-license
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
               - Sid: AwsMarketplaceLicense
                 Effect: Allow
                 Action:
@@ -407,9 +593,9 @@ Resources:
       Protocol: HTTP
       VpcId: !Ref Vpc
       TargetType: ip
-      HealthCheckPath: /api/health
+      HealthCheckPath: /api/health?probe=live
       Matcher:
-        HttpCode: 200-503
+        HttpCode: 200
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -434,6 +620,14 @@ Resources:
       RuntimePlatform:
         OperatingSystemFamily: LINUX
         CpuArchitecture: X86_64
+      Volumes:
+        - Name: app-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref DataFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref DataAccessPoint
+              IAM: ENABLED
       ContainerDefinitions:
         - Name: app
           Image: !Ref ContainerImage
@@ -457,6 +651,20 @@ Resources:
               Value: !Ref AWS::Region
             - Name: AI_PROVIDER
               Value: disabled
+            - Name: SBOM_CLI_S3_BUCKET
+              Value: !Ref SbomCliBucket
+            - Name: SBOM_CLI_DOWNLOAD_BASE
+              Value: !Sub https://${SbomCliBucket}.s3.${AWS::Region}.amazonaws.com
+            - Name: SECURITY_DOCUMENT_STORAGE_DIR
+              Value: /app/data/security-documents
+            - Name: ASSESSOR_PACK_STORAGE_DIR
+              Value: /app/data/assessor-packs
+            - Name: BRANDING_ASSET_STORAGE_DIR
+              Value: /app/data/branding-assets
+            - Name: ALIGNR_BACKUP_DESTINATION
+              Value: !Sub s3://${BackupBucket}/nightly
+            - Name: ALIGNR_HOST_SCANS_ENABLED
+              Value: "true"
             - Name: ALIGNR_LOG_SERVICE
               Value: cod-app
           Secrets:
@@ -474,10 +682,14 @@ Resources:
               ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_INSTALL_ID::"
             - Name: ALIGNR_LICENSE_KEY
               ValueFrom: !Sub "${RuntimeSecret}:ALIGNR_LICENSE_KEY::"
+          MountPoints:
+            - SourceVolume: app-data
+              ContainerPath: /app/data
+              ReadOnly: false
           HealthCheck:
             Command:
               - CMD-SHELL
-              - 'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.status<500||r.status===503?0:1)).catch(()=>process.exit(1))"'
+              - 'node -e "fetch(''http://127.0.0.1:3000/api/health?probe=live'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
             Interval: 30
             Timeout: 10
             Retries: 5
@@ -502,6 +714,14 @@ Resources:
       RuntimePlatform:
         OperatingSystemFamily: LINUX
         CpuArchitecture: X86_64
+      Volumes:
+        - Name: app-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref DataFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref DataAccessPoint
+              IAM: ENABLED
       ContainerDefinitions:
         - Name: worker
           Image: !Ref ContainerImage
@@ -518,6 +738,20 @@ Resources:
               Value: !Ref AWS::Region
             - Name: AI_PROVIDER
               Value: disabled
+            - Name: SBOM_CLI_S3_BUCKET
+              Value: !Ref SbomCliBucket
+            - Name: SBOM_CLI_DOWNLOAD_BASE
+              Value: !Sub https://${SbomCliBucket}.s3.${AWS::Region}.amazonaws.com
+            - Name: SECURITY_DOCUMENT_STORAGE_DIR
+              Value: /app/data/security-documents
+            - Name: ASSESSOR_PACK_STORAGE_DIR
+              Value: /app/data/assessor-packs
+            - Name: BRANDING_ASSET_STORAGE_DIR
+              Value: /app/data/branding-assets
+            - Name: ALIGNR_BACKUP_DESTINATION
+              Value: !Sub s3://${BackupBucket}/nightly
+            - Name: ALIGNR_HOST_SCANS_ENABLED
+              Value: "true"
             - Name: ALIGNR_LOG_SERVICE
               Value: cod-worker
           Secrets:
@@ -541,10 +775,17 @@ Resources:
               awslogs-group: !Ref LogGroupWorker
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: worker
+          MountPoints:
+            - SourceVolume: app-data
+              ContainerPath: /app/data
+              ReadOnly: false
 
   AppService:
     Type: AWS::ECS::Service
-    DependsOn: Listener
+    DependsOn:
+      - Listener
+      - DataMountTarget1
+      - DataMountTarget2
     Properties:
       ServiceName: !Sub ${NamePrefix}-app
       Cluster: !Ref Cluster
@@ -552,6 +793,11 @@ Resources:
       DesiredCount: 1
       LaunchType: FARGATE
       EnableExecuteCommand: true
+      HealthCheckGracePeriodSeconds: 180
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
@@ -567,6 +813,9 @@ Resources:
 
   WorkerService:
     Type: AWS::ECS::Service
+    DependsOn:
+      - DataMountTarget1
+      - DataMountTarget2
     Properties:
       ServiceName: !Sub ${NamePrefix}-worker
       Cluster: !Ref Cluster
@@ -594,3 +843,9 @@ Outputs:
     Value: Unsubscribe = delete this stack. Data stays in the buyer account.
   AccessNote:
     Value: This stack is VPC-internal. Reach /setup from a VPN or SSM port-forward. It is not published to the internet.
+  SbomCliBucket:
+    Description: Upload signed binaries to s3://<this>/sbom-cli/ (cod-sbom-darwin-arm64, …).
+    Value: !Ref SbomCliBucket
+  BackupBucket:
+    Description: Nightly backups go to s3://<this>/nightly when ALIGNR_BACKUP_DESTINATION is set.
+    Value: !Ref BackupBucket

@@ -10,13 +10,13 @@ The default stack is **VPC-internal**: internal ALB, no public IPs on tasks, ALB
 
 ## Choose a template
 
-Start with `terraform/` unless you already know you need the Well-Architected extras. That optional stack costs more (dual NAT, Multi-AZ data plane, WAF, CMK, long-retention logs).
+Start with `terraform/` unless you already know you need the Well-Architected extras. That optional stack costs more (dual NAT, WAF, secret rotation). Keep one app task — the Marketplace seat is `Count=1`.
 
 | Path | Use when |
 | --- | --- |
-| [`terraform/`](terraform/) | **Default.** One NAT, single-AZ RDS and Redis, one app task, 2 GiB task memory. |
-| [`cloudformation/cod-fargate.yaml`](cloudformation/cod-fargate.yaml) | Same lean stack in the AWS console or CLI. |
-| [`terraform-well-architected/`](terraform-well-architected/) | **Optional.** Dual NAT, Multi-AZ data plane, CMK, WAF, flow logs, ALB access logs, secret rotation. |
+| [`terraform/`](terraform/) | **Default.** One NAT, Multi-AZ RDS and Redis, CMK, flow logs, ALB access logs, one app task, 2 GiB task memory. Checkov reports zero failed checks. |
+| [`cloudformation/cod-fargate.yaml`](cloudformation/cod-fargate.yaml) | Lean stack in the AWS console or CLI (single-AZ, no CMK). |
+| [`terraform-well-architected/`](terraform-well-architected/) | **Optional.** Dual NAT, WAF, and Secrets Manager rotation on top of the default controls. |
 | [`charts/cod/`](charts/cod/) | EKS. You still provision RDS + ElastiCache yourself. |
 | [`ecs/`](ecs/) | Sample Fargate task definitions matching the lean stack. |
 | [`scripts/ecs-redeploy.sh`](scripts/ecs-redeploy.sh) | Pin running services to a new image digest. |
@@ -51,11 +51,11 @@ NAT is only for outbound scans (cloud and SaaS APIs). Tasks themselves have no p
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) v2
 - Terraform >= 1.6 **or** permission to upload CloudFormation
 - A Marketplace subscription to COD
-- The Marketplace ECR image **digest** (`…@sha256:<64 hex>`)
+- The Marketplace ECR image digest (`…@sha256:<64 hex>`) or immutable tag (`:1.0.N`)
 - The signed COD license JWT issued for this buyer
 - A path into the VPC: VPN, Direct Connect, or ECS Exec / SSM
 
-Supported regions in the Terraform variables: `ap-southeast-2` (default) and `us-east-1`.
+Supported regions: Australia only — `ap-southeast-2` (Sydney, default) or `ap-southeast-4` (Melbourne). Marketplace ECR remains in `us-east-1` because AWS hosts that registry.
 
 ## 1. ECS Fargate — Terraform (default)
 
@@ -67,7 +67,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 Edit `terraform.tfvars`:
 
-1. Set `container_image` to the Marketplace ECR digest. `latest` is rejected.
+1. Set `container_image` to the Marketplace ECR digest or immutable tag. `latest` is rejected.
 2. Set `license_key` to the signed JWT. Do not commit the real value.
 3. Leave `domain` empty to use the internal ALB DNS name, or set the hostname operators will type.
 4. Leave `allowed_ingress_cidrs` empty to allow only the VPC CIDR. Add a VPN or shared-services CIDR if you have one. Do not use `0.0.0.0/0`.
@@ -91,7 +91,7 @@ aws ecs execute-command \
   --task <app-task-id> \
   --container app \
   --interactive \
-  --command "curl -sS http://127.0.0.1:3000/api/health"
+  --command "curl -sS 'http://127.0.0.1:3000/api/health?probe=live'"
 ```
 
 What the default stack creates:
@@ -105,6 +105,9 @@ What the default stack creates:
 - Secrets Manager runtime secret (license, setup token, DB URL, Redis URL, session and encryption keys)
 - CloudWatch log groups, 30-day retention
 - ECS Exec on both services
+- Encrypted EFS at `/app/data` so the app and worker share assessor packs, security documents, and branding (Compose used local named volumes on one host)
+- Private S3 bucket for nightly Postgres dumps (`terraform output backup_bucket`, `ALIGNR_BACKUP_DESTINATION=s3://…/nightly`)
+- S3 bucket for SBOM CLI binaries (`terraform output sbom_cli_bucket`). The Marketplace image does not ship those binaries. Copy signed files into `terraform/sbom-cli/` (names `cod-sbom-darwin-arm64`, `cod-sbom-darwin-amd64`, `cod-sbom-windows-amd64.exe`) before apply, or `aws s3 cp` them to `s3://<bucket>/sbom-cli/` after.
 
 Destroy is a plain `terraform destroy`. Secrets use a 0-day recovery window so the stack can tear down cleanly.
 
@@ -139,7 +142,7 @@ Same variables as the default. Higher AWS spend. Do not start here.
 
 Adds:
 
-- NAT per AZ, Multi-AZ Postgres and Redis, two app tasks
+- NAT per AZ, Multi-AZ Postgres and Redis
 - Customer-managed KMS for RDS, Redis, Secrets, and logs
 - WAF on the internal ALB
 - VPC flow logs, ALB access logs, 365-day encrypted logs
@@ -175,7 +178,7 @@ helm upgrade --install cod charts/cod --namespace cod --create-namespace \
   --set domain='cod.example.com'
 ```
 
-Set `args`, not `command`, so the image entrypoint still runs migrate. Default `arch: amd64` matches the Fargate stack. App and worker request **2Gi** memory.
+Set `args`, not `command`, so the image entrypoint still runs migrate. Default `arch: amd64` matches the Fargate stack. App and worker request **2Gi** memory. Keep both replica counts at 1. Persistence needs an RWX StorageClass (EFS CSI) so app and worker share `/app/data`.
 
 Terminate HTTPS on your Ingress or load balancer. The chart ships a ClusterIP Service on port 3000.
 
@@ -190,8 +193,8 @@ Settings shows a licence fingerprint only. It never prints the raw JWT.
 
 ## Licence and image pin
 
-- Subscribe on AWS Marketplace before you pull or deploy. The image calls License Manager `CheckoutLicense` at boot and every 15 minutes. Product identity is baked into the image. There is no skip flag.
-- Pin `@sha256:<digest>`. Templates reject `latest`.
+- Subscribe on AWS Marketplace before you pull or deploy. The image calls License Manager `CheckoutLicense` (`standard_workspace` Count=1) at boot and `AWS::Marketplace::Usage` every 15 minutes. Product identity is baked into the image. There is no skip flag.
+- Pin a Marketplace ECR digest (`@sha256:…`) or immutable tag (`:1.0.N` or `:sha-<7>`). Templates reject `latest`.
 - Pass the signed JWT as `license_key` / `LicenseKey`. Store it in Secrets Manager.
 
 RDS connections use `sslmode=verify-full` with the Amazon RDS global CA bundle baked into the image (`NODE_EXTRA_CA_CERTS` / `PGSSLROOTCERT`).
@@ -224,7 +227,7 @@ AWS_REGION=ap-southeast-2 \
 
 | Resource | Default | Well-Architected |
 | --- | --- | --- |
-| App / worker memory | 2 GiB (minimum) | 2 GiB (minimum), two app tasks |
+| App / worker memory | 2 GiB (minimum) | 2 GiB (minimum) |
 | NAT | 1 | 1 per AZ |
 | RDS | `db.t4g.medium`, single-AZ | Multi-AZ, PI, enhanced monitoring |
 | Redis | `cache.t4g.small`, 1 node | 2 nodes, automatic failover |
@@ -274,6 +277,10 @@ Do not put long-lived AWS keys in the task definition. Per-workspace cloud-scan 
 | --- | --- |
 | Execution | Pull the image, write logs, `secretsmanager:GetSecretValue` |
 | Task | ECS Exec (`ssmmessages:*`) and License Manager (`CheckoutLicense`, `GetLicense`, `CheckInLicense`, `ExtendLicenseConsumption`, `ListReceivedLicenses`; Resource `*` is required by AWS). Attach extra policies in the buyer account if tasks must call your own AWS APIs |
+
+## CI
+
+Pushes and pull requests to `main` run [`.github/workflows/security.yml`](.github/workflows/security.yml): Terraform fmt and validate, Helm lint, Checkov, Gitleaks, and Trivy.
 
 ## Support
 

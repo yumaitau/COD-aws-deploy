@@ -1,11 +1,11 @@
 variable "aws_region" {
   type        = string
-  description = "AWS region for every resource. ap-southeast-2 is the default COD region."
+  description = "AWS region for every resource. Australia only: Sydney (default) or Melbourne."
   default     = "ap-southeast-2"
 
   validation {
-    condition     = contains(["ap-southeast-2", "us-east-1"], var.aws_region)
-    error_message = "Supported regions are ap-southeast-2 (default) and us-east-1."
+    condition     = contains(["ap-southeast-2", "ap-southeast-4"], var.aws_region)
+    error_message = "Deploy in Australia only: ap-southeast-2 (Sydney) or ap-southeast-4 (Melbourne)."
   }
 }
 
@@ -22,14 +22,18 @@ variable "name_prefix" {
 
 variable "container_image" {
   type        = string
-  description = "Marketplace ECR image digest for app and worker. Must be sha256-pinned. latest is rejected."
+  description = "Marketplace ECR digest (@sha256:...) or immutable tag (:1.0.N or :sha-<7>). latest is rejected."
 
   validation {
     condition = (
-      can(regex("@sha256:[0-9a-f]{64}$", var.container_image)) &&
-      !can(regex(":[Ll][Aa][Tt][Ee][Ss][Tt](@|$)", var.container_image))
+      !can(regex(":[Ll][Aa][Tt][Ee][Ss][Tt](@|$)", var.container_image)) &&
+      (
+        can(regex("@sha256:[0-9a-f]{64}$", var.container_image)) ||
+        can(regex(":[0-9]+\\.[0-9]+\\.[0-9]+$", var.container_image)) ||
+        can(regex(":sha-[0-9a-f]{7}(-amd64|-arm64)?$", var.container_image))
+      )
     )
-    error_message = "container_image must end in @sha256:<64 hex>. Floating tags such as latest are not allowed."
+    error_message = "container_image must be a Marketplace ECR digest or immutable tag (:1.0.N or :sha-<7>). latest is not allowed."
   }
 }
 
@@ -110,5 +114,11 @@ variable "redis_node_type" {
 variable "certificate_arn" {
   type        = string
   description = "Optional ACM certificate ARN. Empty keeps HTTP on the internal ALB for VPC-only access."
+  default     = ""
+}
+
+variable "sbom_cli_artifact_dir" {
+  type        = string
+  description = "Directory containing published COD SBOM CLI binaries (cod-sbom-darwin-arm64, cod-sbom-darwin-amd64, cod-sbom-windows-amd64.exe). Empty uses ./sbom-cli next to this module. Missing files are skipped."
   default     = ""
 }
