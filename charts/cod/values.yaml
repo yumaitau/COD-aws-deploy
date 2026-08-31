@@ -1,11 +1,13 @@
 # Buyer-overridable values for the AWS Marketplace Helm fulfillment option.
-# Pin Marketplace ECR with image.digest. Do not ship :latest to buyers.
+# Pin Marketplace ECR. Do not ship :latest to buyers.
 image:
-  repository: ""
+  repository: 709825985650.dkr.ecr.us-east-1.amazonaws.com/yuma-it/cod-aws
   digest: ""
-  tag: ""
+  tag: "1.0.4"
   pullPolicy: IfNotPresent
 
+# Marketplace contract is standard_workspace Count=1. Do not scale either
+# deployment above 1 — both containers call CheckoutLicense at boot.
 app:
   replicaCount: 1
   cpu: 512m
@@ -25,11 +27,19 @@ databaseUrl: ""
 redisUrl: ""
 
 domain: cod.example.com
+# Empty defaults to https://{{ domain }}. Set http://… when TLS terminates at the mesh.
+betterAuthUrl: ""
 licenseKey: ""
 skipSeed: "false"
-hostScansEnabled: "false"
+# Dedicated worker pod/task is the scanner. Compose-on-one-box stays false.
+hostScansEnabled: "true"
 aiProvider: disabled
 awsRegion: ap-southeast-2
+# Marketplace image deletes public/downloads. Point at the buyer S3 prefix.
+sbomCliBucket: ""
+sbomCliDownloadBase: ""
+# s3://bucket/nightly uses the task/IRSA role. Local path needs persistence.enabled.
+backupDestination: ""
 # Matches the CloudFormation/Terraform Fargate stack (X86_64).
 # Set arm64 only when the image is linux/arm64 and the cluster has Graviton nodes.
 arch: amd64
@@ -39,8 +49,12 @@ nodeTlsRejectUnauthorized: ""
 betterAuthSecret: ""
 encryptionMasterKey: ""
 setupToken: ""
+# Stable install id. Empty keeps the existing Secret value on helm upgrade.
+installId: ""
 
+# RWX (EFS CSI) required so app and worker share assessor packs, documents, branding.
+# Default StorageClass is usually EBS RWO and will fail or not share across pods.
 persistence:
-  enabled: false
+  enabled: true
   storageClass: ""
-  size: 10Gi
+  size: 20Gi

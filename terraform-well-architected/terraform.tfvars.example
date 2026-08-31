@@ -2,7 +2,8 @@ aws_region = "ap-southeast-2"
 name_prefix = "cod"
 
 # Replace with the Marketplace ECR digest from the COD listing.
-container_image = "709825985650.dkr.ecr.us-east-1.amazonaws.com/yumaitau/compliance-on-demand@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+# Published Marketplace image 1.0.4 (multi-arch index).
+container_image = "709825985650.dkr.ecr.us-east-1.amazonaws.com/yuma-it/cod-aws@sha256:e93c81a4bd42a1e36c760a48a12709736b0a291ab4003bd669b43f91152fe4e5"
 
 # Signed JWT issued for this buyer. Do not commit the real value.
 license_key = "REPLACE_WITH_SIGNED_JWT"
