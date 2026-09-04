@@ -18,7 +18,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
 
       - uses: azure/setup-helm@v4
         with:
