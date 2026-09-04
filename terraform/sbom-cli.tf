@@ -1,8 +1,8 @@
 locals {
   sbom_cli_files = {
-    "cod-sbom-darwin-arm64"       = "application/octet-stream"
-    "cod-sbom-darwin-amd64"       = "application/octet-stream"
-    "cod-sbom-windows-amd64.exe"  = "application/octet-stream"
+    "cod-sbom-darwin-arm64"      = "application/octet-stream"
+    "cod-sbom-darwin-amd64"      = "application/octet-stream"
+    "cod-sbom-windows-amd64.exe" = "application/octet-stream"
   }
   sbom_cli_dir = var.sbom_cli_artifact_dir != "" ? var.sbom_cli_artifact_dir : "${path.module}/sbom-cli"
   sbom_cli_objects = {
@@ -22,6 +22,7 @@ resource "aws_s3_bucket" "sbom_cli" {
   #checkov:skip=CKV_AWS_18:Artifact bucket; access logs are optional for buyer-hosted binaries
   #checkov:skip=CKV_AWS_144:Single-region marketplace stack; CRR is a buyer DR choice
   #checkov:skip=CKV_AWS_145:SSE-S3 is enough for public signed CLI binaries
+  #checkov:skip=CKV2_AWS_6:Public read of sbom-cli/* is required by Marketplace images
   bucket        = "${local.name}-${data.aws_caller_identity.current.account_id}-sbom-cli"
   force_destroy = true
 }
