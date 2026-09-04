@@ -1,0 +1,7 @@
+misconfigurations:
+  - id: AVD-AWS-0132
+    paths:
+      - "**/cod-fargate.yaml"
+    statement: >-
+      AWS Application Load Balancer access logs support SSE-S3 (AES256) only;
+      SSE-KMS is not supported for the destination bucket.

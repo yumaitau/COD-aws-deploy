@@ -14,8 +14,8 @@ locals {
   data_volume = {
     name = "app-data"
     efsVolumeConfiguration = {
-      fileSystemId          = aws_efs_file_system.data.id
-      transitEncryption     = "ENABLED"
+      fileSystemId      = aws_efs_file_system.data.id
+      transitEncryption = "ENABLED"
       authorizationConfig = {
         accessPointId = aws_efs_access_point.data.id
         iam           = "ENABLED"

@@ -131,6 +131,7 @@ jobs:
         with:
           scan-type: fs
           scanners: secret,misconfig
+          trivyignores: .trivyignore.yaml
           format: sarif
           output: trivy-secrets-and-misconfigurations.sarif
 
@@ -173,6 +174,7 @@ jobs:
         with:
           scan-type: config
           scan-ref: cloudformation
+          trivyignores: .trivyignore.yaml
           format: sarif
           output: trivy-cloudformation.sarif
 
